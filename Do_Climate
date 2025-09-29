@@ -1,0 +1,317 @@
+***********
+
+***********
+                                                       
+															          * SANKARE  Aminata
+																	  
+                                                              			  
+clear all 
+set more off, permanently 
+global directory "/Users/aminatasankare/Desktop/Preanalyse_plan"
+
+cd "$directory"
+
+cd Logfiles 
+
+capture log close
+
+log using logBase.log, replace  
+
+****** Log transformation of variables
+cd ../Base
+use Base2.dta
+
+gen lY=log(Prod_index)
+gen lSuperficie=log(Superficie)
+gen lPop=log(Pop_active)
+gen lbetail=log(livestock)
+gen lPIB=log(PIB)
+gen lengrais=log(Engrais)
+gen lemission=log(emission_CO2)
+
+
+****** panel statement
+
+egen idcoun = group(country)  
+xtset idcoun idyear 
+
+
+forvalues p=2000/2017 {
+gen yr`p'=1 if year==`p'
+replace yr`p'=0 if yr`p'==.
+label variable yr`p' "1 if year=`p'"
+}
+
+
+tab idcoun, gen(did)  //did=muettes individus
+
+*-----------------------------------------------------------------------
+**Split the sample between Sub-Saharan African (SSA) countries and Other Developing Countries (ODCs)
+
+generate Pays=0
+replace Pays=1 if Region=="Afrique subsaharienne (hors revenu élevé)"
+
+
+
+*-----------------------------------------------------------------------
+**DESCRIPTIVE STATISTICS and CORRELATION TABLE
+sum  Prod_index pluie temp Superficie Pop livestock Scolarisation
+pwcorr  Prod_index choc_pluie choc_temp Superficie Pop emission_CO2 livestock Scolarisation, star(05)b 
+
+
+
+*****************************
+
+twoway (scatter lY lpluie) (lfit lY lpluie),  title("Relation entre la production agricole et la pluviométrie") xtitle("Production agricole") ytitle("pluviométie")
+graph export figure1.png
+
+twoway (scatter lY temp) (lfit lY temp),  title("Relation entre la production agricole et la température") xtitle("Production agricole") ytitle("sécurite température")
+graph export figure2.png
+
+preserve
+collapse (mean) temp, by(year)
+twoway line temp year,  title("Tendance des températures dans les pays de notre échantillon") xtitle("") ytitle("température")
+restore
+graph export figure3.png
+
+preserve
+collapse (mean) pluie, by(year)
+twoway line pluie year,  title("Tendance des précipitations dans les pays de notre échantillon") xtitle("") ytitle("Pluviométrique")
+restore
+graph export figure4.png
+preserve
+
+*-------------------------------------------------------------------------------
+
+**********************************************************************
+****************TEST FISHER ET DE BRUSH PAGAN*****************
+**********************************************************************
+
+
+xtreg lY Vpluie Vtemp lPop lSuperficie lbetail Scolarisation yr* did*
+* Individuels
+testparm did* // we have a 0% chance of rejecting H0 by being wrong, so we reject H0. All fixed effects are different from 0, so we prefer the fixed effect model to the OLS.
+** Temporels
+testparm yr* // we have a 0% chance of rejecting H0 by being wrong, so we reject H0. All fixed effects are different from 0, so we prefer the fixed effect model to the OLS.
+ 
+ **we do the brush pagan test. Ho: var(u)=0 (absence of random effects)
+xtreg lY Vpluie Vtemp lPop lSuperficie lbetail Scolarisation, re
+xttest0  //test
+
+// We have a 0% chance of rejecting H0 by being wrong. Therefore, we will reject H0.
+// We therefore have the presence of random effects.
+*-------------------------------------------------------------------------------
+*********MCO**********
+
+** MCO POOLING
+**==========
+reg lY temp lPop lSuperficie lbetail yr*
+estimate store pooling 
+
+
+**EFFET FIXE
+xtreg lY Vpluie
+
+*** > We have the P_value < 0.10 We reveal the fixed effect model
+
+
+
+//CONCLUSION: The correct model is the fixed-effect model
+*---------------------------------------------------
+** Panel tests
+
+
+* Le test Breusch-Pagan : HO: absence of random effects
+xtreg lY Vpluie lPop lSuperficie emission_CO2 lbetail Scolarisation i.year , re
+xttest0 																		
+
+* Test de Fisher : HO : absence of fixed effects
+xtreg lY Vpluie lPop lSuperficie emission_CO2 lbetail Scolarisation i.year , fe
+outreg2 using R.xls, append
+
+
+* The Hausman test of convergence of specific effects
+xtreg lY Vpluie lPop lSuperficie emission_CO2 lbetail Scolarisation i.year, fe
+eststo fe
+
+xtreg lY Vpluie lPop lSuperficie emission_CO2 lbetail Scolarisation i.year, re
+eststo re
+hausman fe re 																	
+
+
+
+* The homoscedasticity test
+xtreg lY Vpluie lPop lSuperficie emission_CO2 lbetail Scolarisation i.year, fe
+xttest3 																		
+
+xtreg lY Vpluie lPop lSuperficie emission_CO2 lbetail Scolarisation i.year, fe ro 							
+xtreg lY Vpluie lPop lSuperficie emission_CO2 lbetail Scolarisation i.year, fe cluster(idcoun) 			// Heteroscedasticity correction at the individual level [vce: var/cov matrix; cluster: serial autocorrelation structure is not imposed]
+
+
+* The first-order serial autocorrelation test
+xtregar lY Vpluie lPop lSuperficie emission_CO2 lbetail Scolarisation, fe lbi
+eststo arfe 																	
+* Dickey Fuller Unit Root Test
+
+xtunitroot fisher lY, pperron lags(1) demean trend
+xtunitroot fisher lY, pperron lags(1) demean
+
+xtunitroot fisher lpluie, pperron lags(1) demean trend
+xtunitroot fisher lpluie, pperron lags(1) demean
+
+
+xtunitroot fisher temp, pperron lags(1) demean trend
+xtunitroot fisher temp, pperron lags(1) demean
+
+
+
+**************$ Principaux résultats
+
+
+xtreg lY choc_pluie  yr*, fe ro // good
+outreg2 tab1.xls, replace
+xtreg lY choc_pluie lPop yr*, fe ro // good 
+outreg2 tab1.xls, append
+xtreg lY choc_pluie lPop Engrais yr*, fe ro    // good
+outreg2 tab1.xls, append
+xtreg lY choc_pluie lPop Engrais emission_CO2  yr*, fe ro    // good
+outreg2 tab1.xls, append
+xtreg lY choc_pluie lPop Engrais emission_CO2 lSuperficie Scolarisation yr*, fe ro    // good
+outreg2 tab1.xls, append
+
+
+
+
+
+xtreg lY Vpluie  yr*, fe ro // bon 
+outreg2 tab10.xls, replace
+xtreg lY Vpluie lPop Engrais emission_CO2 lSuperficie Scolarisation yr*, fe ro    // good
+outreg2 tab10.xls, append
+xtreg lY Vtemp yr*, fe ro // bon 
+outreg2 tab10.xls, append
+xtreg lY Vtemp lPop Engrais emission_CO2 lSuperficie Scolarisation yr*, fe ro    // good
+outreg2 tab10.xls, append
+
+
+
+
+
+
+
+*********************************** ROBUSTNESS *****************************
+
+******* filtre HP
+
+tsfilter hp Tcycle=temp, smooth(6.25)
+tsfilter hp Pcycle=pluie, smooth(6.25)
+
+gen Pluiecycle=Pcycle/100
+
+xtreg lY Pluiecycle  yr*, fe ro // bon 
+outreg2 tab2.xls, replace
+xtreg lY Pluiecycle lPop yr*, fe ro // bon 
+outreg2 tab2.xls, append
+xtreg lY Pluiecycle lPop Engrais yr*, fe ro    // bon
+outreg2 tab2.xls, append
+xtreg lY Pluiecycle lPop Engrais emission_CO2  yr*, fe ro    // bon
+outreg2 tab2.xls, append
+xtreg lY Pluiecycle lPop Engrais emission_CO2 lSuperficie Scolarisation yr*, fe ro    // bon
+outreg2 tab2.xls, append
+
+
+
+
+xtreg lY Pluiecycle  yr*, fe ro // bon 
+outreg2 tab11.xls, replace
+xtreg lY Pluiecycle lPop Engrais emission_CO2 lSuperficie Scolarisation yr*, fe ro    // bon
+outreg2 tab11.xls, append
+xtreg lY Tcycle yr*, fe ro // bon 
+outreg2 tab11.xls, append
+xtreg lY Tcycle lPop Engrais emission_CO2 lSuperficie Scolarisation yr*, fe ro    // bon
+outreg2 tab11.xls, append
+
+
+
+******** le calcul l'écart-type de la moyenne mobile sur 3 ans qui nous donne Temp_SD et Preicp SD
+
+gen moveave1 = (F1.pluie      + pluie      + L1.pluie    )/3
+egen pluie_SD = sd(moveave1), by(year)
+drop moveave1
+
+gen lpluie_SD=log(pluie_SD)
+
+
+gen moveave1 = (F1.temp      + temp      + L1.temp    )/3
+egen temp_SD = sd(moveave1), by(year)
+drop moveave1
+
+gen temp_SD=log(temp_SD)
+
+
+
+
+xtreg lY lpluie_SD  yr*, fe ro // bon 
+outreg2 tab3.xls, replace
+xtreg lY lpluie_SD lPop yr*, fe ro // bon 
+outreg2 tab3.xls, append
+xtreg lY lpluie_SD lPop Engrais yr*, fe ro    // bon
+outreg2 tab3.xls, append
+xtreg lY lpluie_SD lPop Engrais emission_CO2  yr*, fe ro    // bon
+outreg2 tab3.xls, append
+xtreg lY lpluie_SD lPop Engrais emission_CO2 lSuperficie Scolarisation yr*, fe ro    // bon
+outreg2 tab3.xls, append
+
+xtreg lY lpluie_SD  yr*, fe ro // bon 
+outreg2 tab11.xls, replace
+xtreg lY lpluie_SD lPop Engrais emission_CO2 lSuperficie Scolarisation yr*, fe ro    // bon
+outreg2 tab11.xls, append
+xtreg lY temp_SD  yr*, fe ro // bon 
+outreg2 tab11.xls, append
+xtreg lY temp_SD lPop Engrais emission_CO2 lSuperficie Scolarisation yr*, fe ro    // bon
+outreg2 tab11.xls, append
+
+
+*********************************** HETEROGENEITE *****************************
+
+
+
+********* Disiver l'échantillion entre les pays de ASS et les pays non ASS
+
+** les pays de l'Afrique Subsaharienne
+
+
+xtreg lY Vpluie yr* if Pays==1, fe ro // bon 
+outreg2 tab11.xls, replace
+xtreg lY Vpluie lPop Engrais emission_CO2 yr* if Pays==1, fe ro    // bon
+outreg2 tab11.xls, append
+xtreg lY Vpluie lPop Engrais emission_CO2 lSuperficie yr* if Pays==1, fe ro    // bon
+outreg2 tab11.xls, append
+
+** Les pays de l'Afrique non subsaharienne
+
+xtreg lY Vpluie yr* if Pays==0, fe ro // bon 
+outreg2 tab12.xls, replace
+xtreg lY Vpluie lPop Engrais emission_CO2 yr* if Pays==0, fe ro    // bon
+outreg2 tab12.xls, append
+xtreg lY Vpluie lPop Engrais emission_CO2 lSuperficie yr* if Pays==0, fe ro    // bon
+outreg2 tab12.xls, append
+
+******** Qualité institutionelle 
+gen lpIB=log(PIB)
+sum lPIB, detail
+gen PIBA=0
+
+*Median =25.74
+
+replace PIBA=1 if PIBA>25.74
+
+xtreg lY Vpluie yr* if PIBA==1, fe ro // bon 
+outreg2 tab11.xls, replace
+xtreg lY Vpluie lPop Engrais emission_CO2 lSuperficie yr* if PIBA==1, fe ro    // bon
+outreg2 tab11.xls, append
+xtreg lY Vtemp yr* if PIBA==1, fe ro // bon 
+outreg2 tab11.xls, append
+xtreg lY Vtemp lPop Engrais emission_CO2 lSuperficie yr* if PIBA==1, fe ro    // bon
+outreg2 tab11.xls, append
+
+*** On est contraint à continuer à cause d'une insuffisance de données.
